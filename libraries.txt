@@ -1,0 +1,6 @@
+# Wokwi Library List
+# Bibliotecas externas usadas pelo sketch. WiFi ja vem no pacote ESP32.
+
+PubSubClient
+LiquidCrystal I2C
+ArduinoJson
