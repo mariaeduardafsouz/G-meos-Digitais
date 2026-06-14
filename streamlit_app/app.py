@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import time
 from typing import Any
 
@@ -12,6 +13,10 @@ from mqtt_service import MqttTelemetryService
 
 LIMITE_OK = 0.05
 LIMITE_ALERTA = 0.20
+PLOT_TEXT_COLOR = "#102016"
+PLOT_MUTED_COLOR = "#46564b"
+PLOT_GRID_COLOR = "#dfe8dd"
+PLOT_AXIS_COLOR = "#9fb2a5"
 
 
 st.set_page_config(
@@ -24,17 +29,214 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      .status-box {
-        border-radius: 6px;
-        padding: 0.8rem 1rem;
-        font-weight: 700;
-        text-align: center;
-        border: 1px solid rgba(49, 51, 63, 0.2);
+      .stApp {
+        background: #f6f9f4;
       }
-      .status-ok { background: #d8f3dc; color: #1b5e20; }
-      .status-alerta { background: #fff3bf; color: #7c5a00; }
-      .status-falha { background: #ffd6d6; color: #8a1c1c; }
-      .muted { color: #6b7280; }
+
+      .block-container {
+        padding-top: 1.35rem;
+        padding-bottom: 2rem;
+        max-width: 1280px;
+      }
+
+      [data-testid="stSidebar"] {
+        background: #062b1a;
+      }
+
+      [data-testid="stSidebar"] h1,
+      [data-testid="stSidebar"] h2,
+      [data-testid="stSidebar"] h3,
+      [data-testid="stSidebar"] label,
+      [data-testid="stSidebar"] p {
+        color: #f4fbf1;
+      }
+
+      .dashboard-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.35rem 0 1.1rem;
+      }
+
+      .eyebrow {
+        color: #5f6f64;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .dashboard-header h1 {
+        margin: 0.12rem 0 0;
+        color: #102016;
+        font-size: 2rem;
+        line-height: 1.1;
+      }
+
+      .dashboard-header p {
+        margin: 0.35rem 0 0;
+        color: #66766b;
+      }
+
+      .header-pill {
+        min-width: 190px;
+        border: 1px solid #dfe8dd;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #20372a;
+        padding: 0.72rem 1rem;
+        text-align: center;
+        font-weight: 700;
+        box-shadow: 0 8px 24px rgba(18, 34, 24, 0.06);
+      }
+
+      .header-pill.connected {
+        background: #07351f;
+        border-color: #07351f;
+        color: #f4fff5;
+      }
+
+      .header-pill.waiting {
+        background: #fff7d6;
+        border-color: #f1d77a;
+        color: #6f5200;
+      }
+
+      .kpi-card {
+        height: 132px;
+        border: 1px solid #dfe8dd;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 0.9rem 0.95rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        box-shadow: 0 10px 26px rgba(18, 34, 24, 0.055);
+      }
+
+      .kpi-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.7rem;
+      }
+
+      .metric-title {
+        color: #24392b;
+        font-size: 0.86rem;
+        font-weight: 800;
+      }
+
+      .metric-badge {
+        border-radius: 999px;
+        padding: 0.18rem 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 800;
+        background: #edf4e8;
+        color: #12351f;
+      }
+
+      .metric-value {
+        color: #102016;
+        font-size: 1.85rem;
+        line-height: 1.05;
+        font-weight: 800;
+      }
+
+      .metric-caption {
+        color: #6d7b70;
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+
+      .kpi-card.ok {
+        background: #07351f;
+        border-color: #07351f;
+      }
+
+      .kpi-card.ok .metric-title,
+      .kpi-card.ok .metric-value,
+      .kpi-card.ok .metric-caption {
+        color: #f4fff5;
+      }
+
+      .kpi-card.ok .metric-badge {
+        background: #a9e934;
+        color: #07351f;
+      }
+
+      .kpi-card.alerta {
+        background: #fff2bf;
+        border-color: #e7c453;
+      }
+
+      .kpi-card.alerta .metric-title,
+      .kpi-card.alerta .metric-value {
+        color: #5d4300;
+      }
+
+      .kpi-card.alerta .metric-caption {
+        color: #7c640e;
+      }
+
+      .kpi-card.alerta .metric-badge {
+        background: #e2b100;
+        color: #2d2100;
+      }
+
+      .kpi-card.falha {
+        background: #ffe0df;
+        border-color: #e58a86;
+      }
+
+      .kpi-card.falha .metric-title,
+      .kpi-card.falha .metric-value {
+        color: #7b1715;
+      }
+
+      .kpi-card.falha .metric-caption {
+        color: #99403d;
+      }
+
+      .kpi-card.falha .metric-badge {
+        background: #c92d27;
+        color: #fff7f7;
+      }
+
+      .section-title {
+        color: #20372a;
+        font-size: 1rem;
+        font-weight: 800;
+        margin: 0.4rem 0 0.7rem;
+      }
+
+      .status-box {
+        border: 1px solid #dfe8dd;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 1rem;
+        box-shadow: 0 10px 26px rgba(18, 34, 24, 0.055);
+      }
+
+      .status-box strong {
+        display: block;
+        color: #20372a;
+        font-size: 0.96rem;
+        margin-bottom: 0.35rem;
+      }
+
+      .muted {
+        color: #6b7280;
+      }
+
+      .stPlotlyChart {
+        border: 1px solid #dfe8dd;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 0.35rem 0.45rem;
+        box-shadow: 0 10px 26px rgba(18, 34, 24, 0.055);
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -60,17 +262,69 @@ def format_float(value: Any, digits: int = 3) -> str:
         return "-"
 
 
-def status_class(status: str) -> str:
+def format_signed_float(value: Any, digits: int = 3) -> str:
+    try:
+        return f"{float(value):+.{digits}f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def status_tone(status: str) -> str:
     normalized = (status or "").strip().lower()
     if normalized == "ok":
-        return "status-ok"
+        return "ok"
     if normalized == "alerta":
-        return "status-alerta"
-    return "status-falha"
+        return "alerta"
+    if normalized == "falha":
+        return "falha"
+    return "neutral"
 
 
 def status_label(status: str) -> str:
     return (status or "sem dados").upper()
+
+
+def status_caption(status: str) -> str:
+    tone = status_tone(status)
+    if tone == "ok":
+        return "Dentro do limite de precisao"
+    if tone == "alerta":
+        return "Proximo do limite de erro"
+    if tone == "falha":
+        return "Fora da tolerancia definida"
+    return "Aguardando dados MQTT"
+
+
+def metric_card(title: str, value: str, caption: str = "", tone: str = "neutral", badge: str = "") -> None:
+    badge_html = ""
+    if badge:
+        badge_html = f"<span class='metric-badge'>{html.escape(badge)}</span>"
+
+    st.markdown(
+        f"""
+        <div class="kpi-card {html.escape(tone)}">
+          <div class="kpi-head">
+            <span class="metric-title">{html.escape(title)}</span>
+            {badge_html}
+          </div>
+          <div class="metric-value">{html.escape(value)}</div>
+          <div class="metric-caption">{html.escape(caption)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def status_panel(title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="status-box">
+          <strong>{html.escape(title)}</strong>
+          <span class="muted">{html.escape(body)}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def build_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
@@ -121,48 +375,172 @@ def estimate_maintenance(df: pd.DataFrame, limit: float = LIMITE_ALERTA) -> dict
     }
 
 
+def ph_axis_range(df: pd.DataFrame) -> list[float]:
+    values = pd.concat([df["leitura"], df["referencia"]], ignore_index=True).dropna()
+    if values.empty:
+        return [0, 14]
+
+    lower = max(0.0, float(values.min()) - 0.35)
+    upper = min(14.0, float(values.max()) + 0.35)
+    if upper - lower < 0.8:
+        middle = (upper + lower) / 2
+        lower = max(0.0, middle - 0.4)
+        upper = min(14.0, middle + 0.4)
+    return [lower, upper]
+
+
+def chart_axis(title: str = "", axis_range: list[float] | None = None) -> dict[str, Any]:
+    axis = {
+        "title": {"text": title, "font": {"color": PLOT_TEXT_COLOR, "size": 13}},
+        "tickfont": {"color": PLOT_MUTED_COLOR, "size": 12},
+        "gridcolor": PLOT_GRID_COLOR,
+        "linecolor": PLOT_AXIS_COLOR,
+        "tickcolor": PLOT_AXIS_COLOR,
+        "zeroline": False,
+        "showline": True,
+        "ticks": "outside",
+    }
+    if axis_range is not None:
+        axis["range"] = axis_range
+    return axis
+
+
+def chart_legend() -> dict[str, Any]:
+    return {
+        "orientation": "h",
+        "yanchor": "bottom",
+        "y": 1.02,
+        "xanchor": "right",
+        "x": 1,
+        "font": {"color": PLOT_TEXT_COLOR, "size": 12},
+        "bgcolor": "rgba(255,255,255,0.9)",
+    }
+
+
 def draw_ph_chart(df: pd.DataFrame) -> None:
+    y_range = ph_axis_range(df)
+    baseline = [y_range[0]] * len(df)
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["tempo"], y=df["leitura"], mode="lines", name="pH medido"))
-    fig.add_trace(go.Scatter(x=df["tempo"], y=df["referencia"], mode="lines", name="Referencia"))
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=baseline,
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=df["leitura"],
+            mode="lines",
+            name="pH medido",
+            fill="tonexty",
+            fillcolor="rgba(169, 233, 52, 0.28)",
+            line=dict(color="#9bdc2f", width=3, shape="spline"),
+            hovertemplate="pH medido: %{y:.3f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=df["referencia"],
+            mode="lines",
+            name="Valor base do tampao",
+            line=dict(color="#f3b244", width=3, shape="spline"),
+            hovertemplate="Valor base: %{y:.2f}<extra></extra>",
+        )
+    )
     fig.update_layout(
-        height=320,
-        margin=dict(l=20, r=20, t=30, b=20),
-        yaxis_title="pH",
-        xaxis_title="Tempo",
-        legend=dict(orientation="h"),
+        height=360,
+        margin=dict(l=18, r=18, t=18, b=18),
+        yaxis=chart_axis("pH", y_range),
+        xaxis=chart_axis(),
+        legend=chart_legend(),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor=PLOT_GRID_COLOR, font=dict(color=PLOT_TEXT_COLOR)),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color=PLOT_TEXT_COLOR),
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
 def draw_error_chart(df: pd.DataFrame) -> None:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["tempo"], y=df["erro"], mode="lines", name="Erro"))
-    fig.add_hline(y=LIMITE_OK, line_dash="dot", line_color="#2e7d32", annotation_text="+OK")
-    fig.add_hline(y=-LIMITE_OK, line_dash="dot", line_color="#2e7d32", annotation_text="-OK")
-    fig.add_hline(y=LIMITE_ALERTA, line_dash="dash", line_color="#c62828", annotation_text="+Falha")
-    fig.add_hline(y=-LIMITE_ALERTA, line_dash="dash", line_color="#c62828", annotation_text="-Falha")
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=df["erro"],
+            mode="lines",
+            name="Erro",
+            line=dict(color="#2f7f66", width=3, shape="spline"),
+            hovertemplate="Erro: %{y:+.4f}<extra></extra>",
+        )
+    )
+    fig.add_hline(y=LIMITE_OK, line_dash="dot", line_color="#68ad2e", annotation_text="+OK")
+    fig.add_hline(y=-LIMITE_OK, line_dash="dot", line_color="#68ad2e", annotation_text="-OK")
+    fig.add_hline(y=LIMITE_ALERTA, line_dash="dash", line_color="#c92d27", annotation_text="+Falha")
+    fig.add_hline(y=-LIMITE_ALERTA, line_dash="dash", line_color="#c92d27", annotation_text="-Falha")
+    fig.update_annotations(font=dict(color=PLOT_TEXT_COLOR, size=12), bgcolor="rgba(255,255,255,0.82)")
     fig.update_layout(
         height=320,
-        margin=dict(l=20, r=20, t=30, b=20),
-        yaxis_title="Erro (pH)",
-        xaxis_title="Tempo",
-        legend=dict(orientation="h"),
+        margin=dict(l=18, r=18, t=18, b=18),
+        yaxis=chart_axis("Erro (pH)"),
+        xaxis=chart_axis(),
+        legend=chart_legend(),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor=PLOT_GRID_COLOR, font=dict(color=PLOT_TEXT_COLOR)),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color=PLOT_TEXT_COLOR),
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
 def draw_degradation_chart(df: pd.DataFrame) -> None:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df["tempo"], y=df["derivaSensor"], mode="lines", name="Deriva"))
-    fig.add_trace(go.Scatter(x=df["tempo"], y=df["erroMedio"], mode="lines", name="Erro medio"))
-    fig.add_trace(go.Scatter(x=df["tempo"], y=df["erroMaximo"], mode="lines", name="Erro maximo"))
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=df["derivaSensor"],
+            mode="lines",
+            name="Deriva",
+            line=dict(color="#f3b244", width=2.5, shape="spline"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=df["erroMedio"],
+            mode="lines",
+            name="Erro medio",
+            line=dict(color="#2f7f66", width=2.5, shape="spline"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["tempo"],
+            y=df["erroMaximo"],
+            mode="lines",
+            name="Erro maximo",
+            line=dict(color="#c92d27", width=2.5, shape="spline"),
+        )
+    )
     fig.update_layout(
         height=320,
-        margin=dict(l=20, r=20, t=30, b=20),
-        yaxis_title="pH",
-        xaxis_title="Tempo",
-        legend=dict(orientation="h"),
+        margin=dict(l=18, r=18, t=18, b=18),
+        yaxis=chart_axis("pH"),
+        xaxis=chart_axis(),
+        legend=chart_legend(),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor=PLOT_GRID_COLOR, font=dict(color=PLOT_TEXT_COLOR)),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        font=dict(color=PLOT_TEXT_COLOR),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -180,40 +558,65 @@ service = get_mqtt_service(broker, int(port), topic_prefix, int(max_samples))
 snapshot = service.snapshot()
 df = build_dataframe(snapshot["rows"])
 latest = df.iloc[-1].to_dict() if not df.empty else {}
-
-st.title("Gemeo Digital - Medidor de pH")
-st.caption(
-    f"Assinando `{snapshot['stats_topic']}` em `{snapshot['broker']}:{snapshot['port']}`"
-)
-
-conn_col, seen_col, error_col = st.columns([1, 1, 2])
-conn_col.metric("MQTT", "Conectado" if snapshot["connected"] else "Conectando")
-last_seen = snapshot["last_seen"]
-seen_col.metric("Ultima amostra", time.strftime("%H:%M:%S", time.localtime(last_seen)) if last_seen else "-")
-error_col.info(snapshot["last_error"] or "Sem erros recentes.")
-
-st.divider()
-
-metric_cols = st.columns(6)
-metric_cols[0].metric("pH atual", format_float(latest.get("leitura")))
-metric_cols[1].metric("Referencia", format_float(latest.get("referencia"), 2))
-metric_cols[2].metric("Erro", format_float(latest.get("erro"), 4))
-metric_cols[3].metric("Deriva", format_float(latest.get("derivaSensor"), 4))
-metric_cols[4].metric("Erro medio", format_float(latest.get("erroMedio"), 4))
-metric_cols[5].metric("Amostras", str(int(latest.get("totalAmostras", 0))) if latest else "0")
-
 status = str(latest.get("status", ""))
+tone = status_tone(status)
+last_seen = snapshot["last_seen"]
+last_seen_text = time.strftime("%H:%M:%S", time.localtime(last_seen)) if last_seen else "-"
+mqtt_state = "Conectado" if snapshot["connected"] else "Conectando"
+mqtt_pill_class = "connected" if snapshot["connected"] else "waiting"
+
 st.markdown(
-    f"<div class='status-box {status_class(status)}'>STATUS: {status_label(status)}</div>",
+    f"""
+    <div class="dashboard-header">
+      <div>
+        <div class="eyebrow">Gemeo Digital</div>
+        <h1>Medidor de pH</h1>
+        <p>Telemetria MQTT em tempo real comparando o pH medido com a solucao tampao.</p>
+      </div>
+      <div class="header-pill {mqtt_pill_class}">MQTT {html.escape(mqtt_state)}</div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
-st.divider()
+st.caption(f"Assinando `{snapshot['stats_topic']}` em `{snapshot['broker']}:{snapshot['port']}`")
+
+top_cards = st.columns(4)
+with top_cards[0]:
+    metric_card(
+        "pH atual",
+        format_float(latest.get("leitura")),
+        status_caption(status),
+        tone=tone,
+        badge=status_label(status),
+    )
+with top_cards[1]:
+    metric_card(
+        "Valor base",
+        format_float(latest.get("referencia"), 2),
+        str(latest.get("nomeBuffer") or "Solucao tampao"),
+    )
+with top_cards[2]:
+    metric_card("Erro atual", format_signed_float(latest.get("erro"), 4), "Diferenca entre pH real e base")
+with top_cards[3]:
+    metric_card("Amostras", str(int(latest.get("totalAmostras", 0))) if latest else "0", f"Ultima: {last_seen_text}")
+
+bottom_cards = st.columns(4)
+with bottom_cards[0]:
+    metric_card("Erro medio", format_float(latest.get("erroMedio"), 4), "Media acumulada do erro")
+with bottom_cards[1]:
+    metric_card("Erro maximo", format_float(latest.get("erroMaximo"), 4), "Maior desvio observado")
+with bottom_cards[2]:
+    metric_card("Deriva", format_float(latest.get("derivaSensor"), 4), "Deslocamento sintetico do sensor")
+with bottom_cards[3]:
+    metric_card("Broker", mqtt_state, f"{snapshot['broker']}:{snapshot['port']}")
+
+status_panel("Saude da conexao", snapshot["last_error"] or "Sem erros recentes.")
 
 control_col, prediction_col = st.columns([1, 1])
 
 with control_col:
-    st.subheader("Comandos remotos")
+    st.markdown("<div class='section-title'>Comandos remotos</div>", unsafe_allow_html=True)
     buffer_value = st.selectbox("Solucao tampao ativa", ["4.0", "7.0", "10.0"], index=1)
     if st.button("Enviar buffer", use_container_width=True):
         service.publish_buffer(buffer_value)
@@ -230,27 +633,25 @@ with control_col:
         st.success("Comando de calibracao enviado.")
 
 with prediction_col:
-    st.subheader("Manutencao preditiva")
+    st.markdown("<div class='section-title'>Manutencao preditiva</div>", unsafe_allow_html=True)
     prediction = estimate_maintenance(df)
-    st.write(prediction["message"])
+    status_panel("Estimativa", prediction["message"])
     if prediction.get("samples_remaining") is not None:
-        st.metric("Amostras restantes", prediction["samples_remaining"])
+        metric_card("Amostras restantes", str(prediction["samples_remaining"]), "Ate atingir o limite de alerta")
     st.caption("Estimativa simples baseada na tendencia do erro maximo das ultimas amostras.")
-
-st.divider()
 
 if df.empty:
     st.warning("Aguardando dados MQTT. Inicie a simulacao no Wokwi e confirme que o Serial Monitor publica amostras.")
 else:
-    chart_col1, chart_col2 = st.columns(2)
+    chart_col1, chart_col2 = st.columns([2, 1])
     with chart_col1:
-        st.subheader("pH em tempo real")
+        st.markdown("<div class='section-title'>pH medido x valor base da solucao tampao</div>", unsafe_allow_html=True)
         draw_ph_chart(df)
     with chart_col2:
-        st.subheader("Erro de medicao")
+        st.markdown("<div class='section-title'>Erro de medicao</div>", unsafe_allow_html=True)
         draw_error_chart(df)
 
-    st.subheader("Degradacao sintetica")
+    st.markdown("<div class='section-title'>Degradacao sintetica</div>", unsafe_allow_html=True)
     draw_degradation_chart(df)
 
     with st.expander("Ultimas amostras"):
