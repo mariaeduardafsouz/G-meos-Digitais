@@ -359,7 +359,10 @@ html, body { height: 100%; font-family: var(--sans); background: var(--stone-100
   <!-- ════════ Faixa de sinais — continuação do hero, não módulo novo ════════ -->
   <div class="signal-strip">
     <div class="signal-cell">
-      <div class="signal-top"><span class="signal-label">Tendência confirmada</span><span class="signal-trend flat" id="trendAvg">—</span></div>
+      <div class="signal-top">
+        <span class="signal-label" title="Filtra saltos isolados de ruído ou simulação: só reflete uma mudança após ela se confirmar em leituras consecutivas.">Erro médio</span>
+        <span class="signal-trend flat" id="trendAvg">—</span>
+      </div>
       <div class="signal-value" id="kpiAvgErr">—</div>
       <div class="signal-caption">Resistente a saltos isolados · limite 0,20 pH</div>
     </div>
@@ -390,8 +393,6 @@ html, body { height: 100%; font-family: var(--sans); background: var(--stone-100
     </div>
   </div>
   <div class="pred-context" id="predContext">
-    <span>Tendência confirmada: <strong id="ctxTrend">—</strong></span>
-    <span>Erro médio bruto (firmware): <strong id="ctxAvg">—</strong></span>
     <span>Erro máximo registrado: <strong id="ctxMax">—</strong></span>
     <span>Amostras coletadas: <strong id="ctxSamples">0</strong></span>
     <span id="ctxLastTime">Última leitura: —</span>
@@ -402,9 +403,9 @@ html, body { height: 100%; font-family: var(--sans); background: var(--stone-100
        pela linha pontilhada — para onde a tendência aponta. -->
   <div class="chart-panel" id="degradationPanel" style="margin-bottom:1.3rem;display:none">
     <div class="chart-header">
-      <span class="chart-title">Trajetória da tendência confirmada até o limite de falha</span>
+      <span class="chart-title">Trajetória do erro médio até o limite de falha</span>
       <div class="chart-legend">
-        <div class="legend-item"><div class="legend-swatch" style="background:#b91c1c"></div>Tendência confirmada</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#b91c1c"></div>Erro médio</div>
         <div class="legend-item"><div class="legend-swatch" style="background:#b91c1c;border-top:2px dashed #b91c1c;height:0;margin-top:1px"></div>Projeção</div>
         <div class="legend-item"><div class="legend-swatch" style="background:#a8a39d;border-top:2px dotted #a8a39d;height:0;margin-top:1px"></div>Limite 0,20 pH</div>
       </div>
@@ -516,7 +517,7 @@ html, body { height: 100%; font-family: var(--sans); background: var(--stone-100
 const THRESH_OK     = 0.05;
 const THRESH_WARN   = 0.20;
 const DRIFT_RATE    = 0.0002;
-// Amplitude de ruído sintético já definida no firmware (src/main.cpp,
+// Amplitude de ruído sintético já definida no firmware (sketch.ino,
 // função ruidoFalso(0.015f)). Usamos essa constante conhecida do próprio
 // sistema para distinguir "ruído normal" de "salto fora da faixa esperada",
 // em vez de inventar um limiar arbitrário sem base no domínio do problema.
@@ -634,7 +635,7 @@ const cErr = new Chart(document.getElementById('chartErr').getContext('2d'), {
 const cDeg = new Chart(document.getElementById('chartDeg').getContext('2d'), {
   type: 'line',
   data: { labels: [], datasets: [
-    { label: 'Tendência confirmada', data: [], borderColor: '#b91c1c', borderWidth: 2.5, pointRadius: 0, tension: 0.3, spanGaps: true },
+    { label: 'Erro médio', data: [], borderColor: '#b91c1c', borderWidth: 2.5, pointRadius: 0, tension: 0.3, spanGaps: true },
     { label: 'Projeção',             data: [], borderColor: '#b91c1c', borderWidth: 2, borderDash: [6,4], pointRadius: 0, tension: 0, spanGaps: true },
     { label: 'Limite',               data: [], borderColor: '#a8a39d', borderWidth: 1.5, borderDash: [3,3], pointRadius: 0, tension: 0 },
   ]},
@@ -646,7 +647,7 @@ const cDeg = new Chart(document.getElementById('chartDeg').getContext('2d'), {
       }}
     }},
     scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
-      title: { display: true, text: 'Erro de tendência (pH)', font: { family: "'Archivo',sans-serif", size: 11 }, color: '#a8a39d' } } }
+      title: { display: true, text: 'Erro médio (pH)', font: { family: "'Archivo',sans-serif", size: 11 }, color: '#a8a39d' } } }
   }
 });
 
@@ -809,7 +810,7 @@ function updatePredictive(trendErrAtual, samples, driftAtual, instantErr) {
     panel.classList.add('urgency-high');
     icon.textContent = '⛔';
     title.textContent = 'Calibração necessária agora';
-    text.textContent = `A tendência confirmada já atingiu o limite de ${THRESH_WARN.toFixed(2)} pH.`;
+    text.textContent = `O erro médio já atingiu o limite de ${THRESH_WARN.toFixed(2)} pH.`;
     cdValue.textContent = '0'; cdValue.style.color = 'var(--fail)';
     cdFill.style.width = '0%'; cdFill.style.background = 'var(--fail)';
   } else if (rem < 100) {
@@ -823,7 +824,7 @@ function updatePredictive(trendErrAtual, samples, driftAtual, instantErr) {
     panel.classList.add('urgency-low');
     icon.textContent = '✓';
     title.textContent = 'Sensor estável';
-    text.textContent = `Tendência confirmada dentro dos parâmetros, sem necessidade de calibração imediata.`;
+    text.textContent = `Erro médio dentro dos parâmetros, sem necessidade de calibração imediata.`;
     cdValue.textContent = rem; cdValue.style.color = 'var(--ok)';
     cdFill.style.width = fillPct.toFixed(1) + '%'; cdFill.style.background = 'var(--ok)';
   }
@@ -889,16 +890,14 @@ function handleMessage(topic, data) {
   updateHero(tone, ph, ref, bufName);
   updateDeviation(err);
 
-  // Calcula a tendência confirmada por persistência a partir do erro
-  // instantâneo desta amostra — não do erroMedio bruto do firmware.
-  // Isso precisa vir antes de popular a UI, porque a faixa principal
-  // de sinais agora mostra a tendência confirmada, não o erro médio bruto.
+  // O valor exibido como "erro médio" na tela usa o cálculo com
+  // confirmação por persistência (updateConfirmedTrend), não a média
+  // bruta do firmware — mas para o usuário isso aparece como um único
+  // número simples, sem terminologia própria.
   const trendAtual = updateConfirmedTrend(absErr);
 
   document.getElementById('kpiAvgErr').textContent   = fmtF(trendAtual, 4);
   document.getElementById('kpiDrift').textContent    = fmtF(drift, 4);
-  document.getElementById('ctxTrend').textContent    = fmtF(trendAtual, 4);
-  document.getElementById('ctxAvg').textContent      = fmtF(avg, 4);
   document.getElementById('ctxMax').textContent      = fmtF(maxE, 4);
   document.getElementById('ctxSamples').textContent  = samples;
   document.getElementById('ctxLastTime').textContent = 'Última leitura: ' + timeStr;

@@ -169,9 +169,9 @@ O uso de `asyncio.run_coroutine_threadsafe` é o padrão correto para cruzar a b
 
 Usa a API nativa `WebSocket` do navegador para `ws://localhost:9001`. Não usa a biblioteca `mqtt.js` porque o bridge fala WebSocket puro, não MQTT-over-WebSocket — isso simplifica o protocolo e elimina a dependência de biblioteca externa de transporte.
 
-### Tendência confirmada (`updateConfirmedTrend`)
+### Erro médio filtrado (`updateConfirmedTrend`)
 
-Essa é a lógica central do dashboard. O problema: o potenciômetro pode ser girado bruscamente pelo usuário, gerando um pico isolado de erro que, incorporado imediatamente à previsão de manutenção, distorceria o tempo estimado até a falha.
+O valor exibido como "erro médio" na interface usa um algoritmo de confirmação por persistência — não a média bruta do firmware. O problema que ele resolve: o potenciômetro pode ser girado bruscamente pelo usuário, gerando um pico isolado que, incorporado imediatamente à previsão, distorceria o tempo estimado até a falha.
 
 A solução usa dois parâmetros calibrados com base no modelo físico do firmware:
 
@@ -181,25 +181,26 @@ A solução usa dois parâmetros calibrados com base no modelo físico do firmwa
 Algoritmo:
 1. Se a nova leitura está dentro de `trendErr ± NOISE_AMPLITUDE`: atualiza suavemente com média exponencial de peso 90/10
 2. Se está fora: conta como candidata (`pendingErr`)
-3. Somente após `CONFIRM_STREAK` amostras consecutivas: a tendência é atualizada para o novo valor
+3. Somente após `CONFIRM_STREAK` amostras consecutivas: o valor é atualizado para o novo nível
 
 Resultado: um clique isolado no potenciômetro não contamina a previsão. Uma deriva real é capturada após 3 amostras (~6 segundos com intervalo padrão de 2s).
 
 ### Manutenção preditiva
 
-Com a tendência confirmada e a taxa de deriva, o dashboard calcula:
+Com o erro médio filtrado e a taxa de deriva, o dashboard calcula:
 
 ```
-amostras_restantes = (THRESH_WARN − trendErr) / taxa_de_deriva
-tempo_restante = amostras_restantes × intervalo_amostragem
+amostras_restantes = (THRESH_WARN − erroMedioFiltrado) / taxa_de_deriva
 ```
 
-Se o sensor está operando há tempo suficiente, usa a taxa real estimada (`driftAtual / samples`) em vez da constante nominal do firmware.
+Se o sensor está operando há amostras suficientes, usa a taxa real estimada (`driftAtual / samples`) em vez da constante nominal do firmware.
 
-O gráfico de projeção (`Degradação do Sensor`) exibe:
-- Histórico da tendência confirmada (linha sólida)
-- Projeção linear a partir do último ponto (linha tracejada)
-- Limite de falha em 0,20 pH (linha de referência)
+O gráfico de degradação exibe três camadas:
+- **Erro médio** (linha sólida vermelha): histórico do valor filtrado
+- **Projeção** (linha tracejada): extensão linear de 8 pontos com base na inclinação dos últimos 10 valores
+- **Limite 0,20 pH** (linha pontilhada): onde a falha é declarada
+
+O painel de status sinaliza três níveis: estável (`urgency-low`), calibração em breve (`urgency-medium`, menos de 100 amostras restantes) e falha imediata (`urgency-high`, tendência ou leitura instantânea já no limite).
 
 ---
 
