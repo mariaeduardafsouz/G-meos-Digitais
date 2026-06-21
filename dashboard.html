@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Gêmeo Digital — Medidor de pH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+/* ════════════════════════════════════════════════════════════
+   DECISÃO ESTRUTURAL:
+   Sem sidebar permanente. Configuração (broker, buffer, intervalo)
+   é ação ocasional — não merece 232px fixos competindo com dados
+   que mudam a cada segundo. Vira um painel retrátil, fechado por
+   padrão. A tela inteira é dedicada à leitura do sensor.
+   ════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --stone-50:  #fafaf9;
+  --stone-100: #f4f4f3;
+  --stone-200: #e7e5e3;
+  --stone-300: #d6d3d0;
+  --stone-400: #a8a39d;
+  --stone-600: #6b6661;
+  --stone-800: #36332f;
+  --stone-900: #1c1a18;
+
+  --brand: #2d6a4f;
+
+  --ok:        #15803d;
+  --ok-bright: #22c55e;
+  --ok-bg:     #ecfdf3;
+  --warn:      #b45309;
+  --warn-bright:#f59e0b;
+  --warn-bg:   #fffbeb;
+  --fail:      #b91c1c;
+  --fail-bright:#ef4444;
+  --fail-bg:   #fef2f2;
+
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'Archivo', sans-serif;
+}
+
+html, body { height: 100%; font-family: var(--sans); background: var(--stone-100); color: var(--stone-900); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ── Container full-width, sem coluna lateral fixa ──────────── */
+.page { max-width: 980px; margin: 0 auto; padding: 1.6rem 1.5rem 3rem; }
+
+/* ── Top bar: marca + ação de configurar + status de conexão ── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.4rem; gap: 1rem;
+}
+.tb-brand { display: flex; align-items: center; gap: 10px; }
+.tb-mark {
+  width: 30px; height: 30px; border-radius: 7px; background: var(--brand);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px; font-weight: 600; color: #d7f0e2;
+  flex-shrink: 0;
+}
+.tb-title-block { line-height: 1.25; }
+.tb-eyebrow { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--stone-600); }
+.tb-title   { font-family: var(--mono); font-size: 1.15rem; font-weight: 500; color: var(--stone-900); letter-spacing: -0.3px; }
+
+.tb-actions { display: flex; align-items: center; gap: 10px; }
+
+.header-pill {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 999px;
+  font-family: var(--mono); font-size: 0.74rem; font-weight: 600; white-space: nowrap;
+  background: var(--stone-900); color: var(--stone-100);
+}
+.header-pill.waiting { background: var(--warn-bg); color: var(--warn); border: 1px solid #fde68a; }
+.header-pill .hpd { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+
+.cfg-trigger {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--stone-50); border: 1px solid var(--stone-300);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; color: var(--stone-600); cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.cfg-trigger:hover { background: var(--stone-200); border-color: var(--stone-400); }
+.cfg-trigger:active { transform: scale(0.94); }
+.cfg-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ══════════════════════════════════════════════════════════
+   HERO — único território com permissão de cor saturada.
+   ════════════════════════════════════════════════════════════ */
+.hero {
+  border-radius: 20px;
+  margin-bottom: 1.3rem;
+  position: relative;
+  overflow: hidden;
+  min-height: 216px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  background: var(--stone-300);
+  transition: background 0.5s ease;
+}
+.hero::before {
+  content: '';
+  position: absolute; top: 50%; left: 13%;
+  width: 460px; height: 460px;
+  background: radial-gradient(circle, rgba(255,255,255,0.16) 0%, transparent 65%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.hero.tone-ok      { background: linear-gradient(120deg, #14532d 0%, #16a34a 60%, #22c55e 100%); }
+.hero.tone-alerta  { background: linear-gradient(120deg, #78350f 0%, #d97706 60%, #f59e0b 100%); }
+.hero.tone-falha   { background: linear-gradient(120deg, #7f1d1d 0%, #dc2626 60%, #ef4444 100%); }
+.hero.tone-neutral { background: linear-gradient(120deg, var(--stone-600) 0%, var(--stone-400) 100%); }
+
+.hero-left {
+  display: flex; align-items: center; gap: 1.6rem;
+  padding: 1.8rem 1.5rem 1.8rem 2.2rem;
+  position: relative; z-index: 1; min-width: 0;
+}
+.hero-symbol-mega {
+  font-family: var(--mono); font-size: 7.2rem; font-weight: 700; line-height: 1;
+  color: rgba(255,255,255,0.96); text-shadow: 0 4px 24px rgba(0,0,0,0.16);
+  flex-shrink: 0; user-select: none;
+}
+.hero-text { min-width: 0; }
+.hero-status-label {
+  font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em;
+  color: rgba(255,255,255,0.65); margin-bottom: 0.3rem;
+}
+.hero-status-text {
+  font-family: var(--mono); font-size: 2.05rem; font-weight: 700; color: #fff;
+  letter-spacing: -0.5px; line-height: 1.05; margin-bottom: 0.4rem;
+}
+.hero-status-sub { font-size: 0.92rem; color: rgba(255,255,255,0.85); max-width: 380px; line-height: 1.4; }
+
+.hero-right {
+  text-align: right; padding: 1.8rem 2.4rem 1.8rem 1.8rem;
+  position: relative; z-index: 1; border-left: 1px solid rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.hero-reading-label { font-size: 0.76rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(255,255,255,0.62); margin-bottom: 0.3rem; }
+.hero-reading-value { font-family: var(--mono); font-size: 4.1rem; font-weight: 700; color: #fff; line-height: 0.95; letter-spacing: -2px; }
+.hero-reading-ref { font-size: 0.86rem; color: rgba(255,255,255,0.8); margin-top: 0.5rem; font-family: var(--mono); }
+.hero-reading-ref .ref-arrow { opacity: 0.55; margin: 0 4px; }
+
+.hero-deviation {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 0.6rem;
+  font-size: 0.86rem; color: rgba(255,255,255,0.94); font-family: var(--mono);
+}
+.hero-deviation .dev-arrow { font-size: 1rem; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: 1fr; min-height: 0; }
+  .hero-left { padding: 1.6rem 1.6rem 1rem; }
+  .hero-symbol-mega { font-size: 4.6rem; }
+  .hero-right { text-align: left; border-left: none; border-top: 1px solid rgba(255,255,255,0.2); padding: 1.2rem 1.6rem 1.6rem; }
+  .hero-reading-ref, .hero-deviation { justify-content: flex-start; }
+  .hero-reading-value { font-size: 3rem; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Métricas — faixa horizontal compacta, não cards de grade.
+   Lê como continuação do hero, não como módulo novo competindo.
+   ════════════════════════════════════════════════════════════ */
+.signal-strip {
+  display: flex; gap: 0; background: var(--stone-50);
+  border: 1px solid var(--stone-200); border-radius: 14px;
+  margin-bottom: 1.3rem; overflow: hidden;
+}
+.signal-cell {
+  flex: 1; padding: 14px 20px;
+  border-right: 1px solid var(--stone-200);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.signal-cell:last-child { border-right: none; }
+.signal-top { display: flex; align-items: baseline; justify-content: space-between; }
+.signal-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--stone-600); }
+.signal-trend { font-size: 0.78rem; font-family: var(--mono); }
+.signal-trend.up   { color: var(--fail); }
+.signal-trend.down { color: var(--ok); }
+.signal-trend.flat { color: var(--stone-400); }
+.signal-value { font-family: var(--mono); font-size: 1.55rem; font-weight: 500; color: var(--stone-900); letter-spacing: -0.3px; line-height: 1.1; }
+.signal-caption { font-size: 0.74rem; color: var(--stone-600); }
+
+@media (max-width: 640px) {
+  .signal-strip { flex-direction: column; }
+  .signal-cell { border-right: none; border-bottom: 1px solid var(--stone-200); }
+  .signal-cell:last-child { border-bottom: none; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Manutenção preditiva
+   ════════════════════════════════════════════════════════════ */
+.section-label {
+  font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--stone-600); margin-bottom: 0.55rem; margin-top: 0.3rem;
+}
+.pred-panel {
+  border-radius: 14px; padding: 1.1rem 1.3rem; margin-bottom: 0.5rem;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1.2rem;
+  border: 1px solid var(--stone-200); background: var(--stone-50);
+}
+.pred-panel.urgency-medium { background: var(--warn-bg); border-color: #fde68a; }
+.pred-panel.urgency-high   { background: var(--fail-bg); border-color: #fca5a5; }
+.pred-icon { font-size: 30px; line-height: 1; flex-shrink: 0; }
+.pred-text strong { display: block; font-size: 0.9rem; font-weight: 600; color: var(--stone-900); margin-bottom: 2px; }
+.pred-text span { font-size: 0.8rem; color: var(--stone-600); }
+.pred-panel.urgency-medium .pred-text strong, .pred-panel.urgency-medium .pred-text span { color: var(--warn); }
+.pred-panel.urgency-high .pred-text strong, .pred-panel.urgency-high .pred-text span { color: var(--fail); }
+.pred-countdown { text-align: right; flex-shrink: 0; min-width: 130px; }
+.pred-countdown-value { font-family: var(--mono); font-size: 2rem; font-weight: 700; line-height: 1; letter-spacing: -1px; }
+.pred-countdown-label { font-size: 0.74rem; color: var(--stone-600); margin-top: 4px; }
+.pred-countdown-track { height: 6px; border-radius: 3px; background: var(--stone-200); margin-top: 7px; overflow: hidden; }
+.pred-countdown-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease, background 0.3s; }
+.pred-context { display: flex; gap: 1.4rem; margin: 0.4rem 0 1.2rem 0.2rem; font-size: 0.76rem; color: var(--stone-600); flex-wrap: wrap; }
+.pred-context strong { color: var(--stone-900); font-family: var(--mono); font-weight: 500; }
+
+/* ── Chart panels ──────────────────────────────────────────── */
+.chart-panel { background: var(--stone-50); border: 1px solid var(--stone-200); border-radius: 14px; padding: 14px 16px; }
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.chart-title  { font-size: 0.78rem; font-weight: 600; color: var(--stone-900); }
+.chart-legend { display: flex; gap: 12px; font-size: 0.74rem; color: var(--stone-600); }
+.legend-item  { display: flex; align-items: center; gap: 5px; }
+.legend-swatch{ width: 11px; height: 3px; border-radius: 2px; }
+.chart-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 10px; margin-top: 1rem; }
+.chart-full  { margin-top: 10px; }
+@media (max-width: 760px) { .chart-grid { grid-template-columns: 1fr; } }
+
+/* ══════════════════════════════════════════════════════════
+   Painel de configuração — gaveta retrátil, não coluna fixa.
+   Some por padrão. Some por padrão. Abre por cima do conteúdo,
+   não empurra o layout, e não disputa atenção com os dados.
+   ════════════════════════════════════════════════════════════ */
+.cfg-overlay {
+  position: fixed; inset: 0; background: rgba(28,26,24,0.45);
+  opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  z-index: 50;
+}
+.cfg-overlay.open { opacity: 1; pointer-events: auto; }
+
+.cfg-drawer {
+  position: fixed; top: 0; right: 0; height: 100vh; width: 320px;
+  background: var(--stone-900); color: var(--stone-100);
+  transform: translateX(100%); transition: transform 0.3s ease;
+  z-index: 51; overflow-y: auto; padding: 1.3rem 1.2rem 2rem;
+}
+.cfg-drawer.open { transform: translateX(0); }
+
+.cfg-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.2rem; padding-bottom: 1rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.cfg-header-title { font-size: 0.9rem; font-weight: 600; color: #f0efed; }
+.cfg-close { width: 28px; height: 28px; border-radius: 7px; background: rgba(255,255,255,0.06); border: none; color: #d7d2cb; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.cfg-close:hover { background: rgba(255,255,255,0.12); }
+
+.cfg-section { margin-bottom: 1rem; }
+.cfg-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: #6f6a63; margin-bottom: 0.5rem; display: block; }
+.cfg-field { margin-bottom: 0.5rem; }
+.cfg-field label { font-size: 11.5px; color: #9b958d; display: block; margin-bottom: 3px; }
+.cfg-field input, .cfg-field select {
+  width: 100%; padding: 7px 10px; background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #ece9e5;
+  font-family: var(--mono); font-size: 11.5px; outline: none;
+}
+.cfg-field input:focus, .cfg-field select:focus { border-color: var(--brand); }
+.cfg-field select option { background: var(--stone-900); }
+.cfg-divider { border: none; border-top: 1px solid rgba(255,255,255,0.07); margin: 0.9rem 0; }
+.cfg-btn {
+  width: 100%; padding: 8px 12px; background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; color: #d7d2cb;
+  font-family: var(--sans); font-size: 11.5px; font-weight: 500; cursor: pointer;
+  text-align: center; margin-bottom: 6px; transition: background 0.15s, border-color 0.15s;
+}
+.cfg-btn:hover { background: rgba(255,255,255,0.08); border-color: var(--brand); color: #fff; }
+.cfg-btn.danger { border-color: rgba(185,28,28,0.4); color: #f3a6a6; }
+.cfg-btn.danger:hover { background: rgba(185,28,28,0.15); border-color: var(--fail); color: #fca5a5; }
+.cfg-slider-row { display: flex; align-items: center; gap: 8px; }
+.cfg-slider-row input[type=range] { flex: 1; accent-color: var(--brand); }
+.cfg-slider-val { font-family: var(--mono); font-size: 10.5px; color: #9b958d; min-width: 26px; }
+.cfg-conn-status {
+  display: flex; align-items: center; gap: 7px; padding: 7px 10px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 7px; font-size: 10.5px; color: #d7d2cb; margin-bottom: 0.65rem;
+}
+.conn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok-bright); flex-shrink: 0; animation: blink 2s ease-in-out infinite; }
+.conn-dot.warn { background: var(--warn-bright); }
+.conn-dot.fail { background: var(--fail-bright); animation: none; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+/* ── Toast ─────────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--stone-900); color: var(--stone-100);
+  font-family: var(--mono); font-size: 0.8rem; padding: 10px 16px; border-radius: 8px;
+  opacity: 0; transform: translateY(6px); transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none; z-index: 999;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+
+/* ── Empty state ───────────────────────────────────────────── */
+.empty-state {
+  background: var(--stone-50); border: 1px solid var(--stone-200); border-radius: 14px;
+  padding: 2.2rem; text-align: center; color: var(--stone-600); font-size: 0.84rem; margin-top: 1rem;
+}
+.empty-state strong { display: block; color: var(--stone-900); font-size: 0.94rem; margin-bottom: 0.3rem; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+</style>
+</head>
+<body>
+
+<h1 class="sr-only">Gêmeo Digital — Painel do Medidor de pH</h1>
+
+<div class="page">
+
+  <!-- ── TOP BAR ─────────────────────────────────────────── -->
+  <div class="topbar">
+    <div class="tb-brand">
+      <div class="tb-mark">pH</div>
+      <div class="tb-title-block">
+        <div class="tb-eyebrow">Gêmeo Digital</div>
+        <div class="tb-title">Medidor de pH</div>
+      </div>
+    </div>
+    <div class="tb-actions">
+      <div class="header-pill waiting" id="headerPill">
+        <div class="hpd"></div>
+        <span id="headerPillText">Aguardando conexão</span>
+      </div>
+      <button class="cfg-trigger" id="cfgTrigger" onclick="openDrawer()" aria-label="Abrir configurações" title="Configurações">⚙</button>
+    </div>
+  </div>
+
+  <!-- ════════ HERO ════════ -->
+  <div class="hero tone-neutral" id="heroBox" role="status" aria-live="polite">
+    <div class="hero-left">
+      <div class="hero-symbol-mega" id="heroSymbol">○</div>
+      <div class="hero-text">
+        <div class="hero-status-label">Status do sistema</div>
+        <div class="hero-status-text" id="heroStatusText">Sem dados</div>
+        <div class="hero-status-sub" id="heroStatusSub">Aguardando telemetria do sensor via MQTT</div>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="hero-reading-label">pH medido</div>
+      <div class="hero-reading-value" id="heroPH">—</div>
+      <div class="hero-reading-ref">ref <span id="heroRef">—</span><span class="ref-arrow">·</span><span id="heroBufferName">—</span></div>
+      <div class="hero-deviation" id="heroDeviation">
+        <span class="dev-arrow" id="devArrow"></span>
+        <span id="devText">sem desvio registrado</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ Faixa de sinais — continuação do hero, não módulo novo ════════ -->
+  <div class="signal-strip">
+    <div class="signal-cell">
+      <div class="signal-top"><span class="signal-label">Tendência confirmada</span><span class="signal-trend flat" id="trendAvg">—</span></div>
+      <div class="signal-value" id="kpiAvgErr">—</div>
+      <div class="signal-caption">Resistente a saltos isolados · limite 0,20 pH</div>
+    </div>
+    <div class="signal-cell">
+      <div class="signal-top"><span class="signal-label">Deriva do sensor</span><span class="signal-trend flat" id="trendDrift">—</span></div>
+      <div class="signal-value" id="kpiDrift">—</div>
+      <div class="signal-caption">Deslocamento por envelhecimento</div>
+    </div>
+  </div>
+
+  <div class="mqtt-caption" style="font-family:var(--mono);font-size:0.78rem;color:var(--stone-600);margin-bottom:0.9rem">
+    Assinando <code style="background:var(--stone-200);border:1px solid var(--stone-300);border-radius:4px;padding:1px 6px;color:var(--stone-800)" id="capTopic">ph/estatisticas</code>
+    em <code style="background:var(--stone-200);border:1px solid var(--stone-300);border-radius:4px;padding:1px 6px;color:var(--stone-800)" id="capBroker">localhost:9001</code>
+  </div>
+
+  <!-- ════════ Manutenção preditiva — agora com a trajetória visível ════════ -->
+  <div class="section-label">Manutenção preditiva</div>
+  <div class="pred-panel urgency-low" id="predPanel">
+    <div class="pred-icon" id="predIcon">⏳</div>
+    <div class="pred-text">
+      <strong id="predTitle">Aguardando dados</strong>
+      <span id="predText">Coletando telemetria suficiente para estimar tendência.</span>
+    </div>
+    <div class="pred-countdown">
+      <div class="pred-countdown-value" id="countdownValue" style="color:var(--stone-400)">—</div>
+      <div class="pred-countdown-label">amostras até o limite de falha</div>
+      <div class="pred-countdown-track"><div class="pred-countdown-fill" id="countdownFill" style="width:100%;background:var(--stone-400)"></div></div>
+    </div>
+  </div>
+  <div class="pred-context" id="predContext">
+    <span>Tendência confirmada: <strong id="ctxTrend">—</strong></span>
+    <span>Erro médio bruto (firmware): <strong id="ctxAvg">—</strong></span>
+    <span>Erro máximo registrado: <strong id="ctxMax">—</strong></span>
+    <span>Amostras coletadas: <strong id="ctxSamples">0</strong></span>
+    <span id="ctxLastTime">Última leitura: —</span>
+  </div>
+
+  <!-- O gráfico É a manutenção preditiva, não um anexo dela:
+       mostra de onde o erro máximo vem, onde está agora, e —
+       pela linha pontilhada — para onde a tendência aponta. -->
+  <div class="chart-panel" id="degradationPanel" style="margin-bottom:1.3rem;display:none">
+    <div class="chart-header">
+      <span class="chart-title">Trajetória da tendência confirmada até o limite de falha</span>
+      <div class="chart-legend">
+        <div class="legend-item"><div class="legend-swatch" style="background:#b91c1c"></div>Tendência confirmada</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#b91c1c;border-top:2px dashed #b91c1c;height:0;margin-top:1px"></div>Projeção</div>
+        <div class="legend-item"><div class="legend-swatch" style="background:#a8a39d;border-top:2px dotted #a8a39d;height:0;margin-top:1px"></div>Limite 0,20 pH</div>
+      </div>
+    </div>
+    <div style="position:relative; height:220px;">
+      <canvas id="chartDeg"></canvas>
+    </div>
+  </div>
+
+  <!-- ════════ Gráficos de apoio ════════ -->
+  <div id="chartsSection" style="display:none">
+    <div class="chart-grid">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <span class="chart-title">pH medido × referência</span>
+          <div class="chart-legend">
+            <div class="legend-item"><div class="legend-swatch" style="background:#2d6a4f"></div>pH</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#a8a39d;border-top:2px dashed #a8a39d;height:0;margin-top:1px"></div>Ref.</div>
+          </div>
+        </div>
+        <div style="position:relative; height:200px;">
+          <canvas id="chartPH"></canvas>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-header"><span class="chart-title">Erro de medição</span></div>
+        <div style="position:relative; height:200px;">
+          <canvas id="chartErr"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="emptyState" class="empty-state">
+    <strong>Aguardando dados MQTT</strong>
+    Inicie a simulação no Wokwi e confirme que o Serial Monitor publica amostras.
+  </div>
+
+</div>
+
+<!-- ── PAINEL DE CONFIGURAÇÃO (gaveta retrátil) ──────────────── -->
+<div class="cfg-overlay" id="cfgOverlay" onclick="closeDrawer()"></div>
+<aside class="cfg-drawer" id="cfgDrawer">
+  <div class="cfg-header">
+    <span class="cfg-header-title">Configurações</span>
+    <button class="cfg-close" onclick="closeDrawer()" aria-label="Fechar configurações">✕</button>
+  </div>
+
+  <div class="cfg-section">
+    <span class="cfg-label">Conexão MQTT</span>
+    <div id="sbConnStatus" class="cfg-conn-status">
+      <div class="conn-dot warn" id="connDot"></div>
+      <span id="connText">Aguardando conexão</span>
+    </div>
+    <div class="cfg-field"><label>Bridge (host)</label><input id="cfgBroker" value="localhost"/></div>
+    <div class="cfg-field"><label>Porta WebSocket</label><input id="cfgPort" value="9001" type="number"/></div>
+    <div class="cfg-field"><label>Prefixo dos tópicos</label><input id="cfgPrefix" value="ph"/></div>
+    <button class="cfg-btn" onclick="reconnect()">Reconectar</button>
+  </div>
+
+  <hr class="cfg-divider">
+
+  <div class="cfg-section">
+    <span class="cfg-label">Solução Tampão</span>
+    <div class="cfg-field">
+      <label>Tampão ativo</label>
+      <select id="cfgBuffer">
+        <option value="4.0">Biftalato — pH 4,00</option>
+        <option value="7.0" selected>Fosfato — pH 7,00</option>
+        <option value="10.0">Carbonato — pH 10,00</option>
+      </select>
+    </div>
+    <button class="cfg-btn" onclick="sendBuffer()">Enviar buffer →</button>
+  </div>
+
+  <hr class="cfg-divider">
+
+  <div class="cfg-section">
+    <span class="cfg-label">Amostragem</span>
+    <div class="cfg-field"><label>Intervalo (ms)</label><input id="cfgInterval" value="2000" type="number" min="500" max="60000" step="500"/></div>
+    <button class="cfg-btn" onclick="sendInterval()">Enviar intervalo →</button>
+  </div>
+
+  <hr class="cfg-divider">
+
+  <div class="cfg-section">
+    <span class="cfg-label">Exibição</span>
+    <div class="cfg-field">
+      <label>Histórico (amostras)</label>
+      <div class="cfg-slider-row">
+        <input type="range" min="20" max="200" value="60" id="cfgHistory"
+               oninput="historyMax=+this.value; document.getElementById('historyVal').textContent=this.value"/>
+        <span class="cfg-slider-val" id="historyVal">60</span>
+      </div>
+    </div>
+  </div>
+
+  <hr class="cfg-divider">
+
+  <div class="cfg-section">
+    <span class="cfg-label">Manutenção</span>
+    <button class="cfg-btn danger" onclick="calibrate()">⚠ Calibrar sensor</button>
+  </div>
+</aside>
+
+<div id="toast"></div>
+
+<script>
+const THRESH_OK     = 0.05;
+const THRESH_WARN   = 0.20;
+const DRIFT_RATE    = 0.0002;
+// Amplitude de ruído sintético já definida no firmware (src/main.cpp,
+// função ruidoFalso(0.015f)). Usamos essa constante conhecida do próprio
+// sistema para distinguir "ruído normal" de "salto fora da faixa esperada",
+// em vez de inventar um limiar arbitrário sem base no domínio do problema.
+const NOISE_AMPLITUDE = 0.015;
+// Quantas amostras consecutivas fora da faixa de ruído são necessárias
+// para confirmar que um salto é uma mudança real (não um clique isolado
+// de simulação) e atualizar a tendência usada na manutenção preditiva.
+const CONFIRM_STREAK = 3;
+
+let historyMax    = 60;
+
+let mqttClient = null;
+let histLabels = [], histPH = [], histRef = [], histErr = [];
+let histDrift = [], histAvg = [], histMax = [], histTrend = [];
+let hasData = false;
+let prevAvg = null, prevDrift = null;
+
+// ── Tendência confirmada para a manutenção preditiva ─────────────
+// Diferente do erroMedio do firmware (que soma tudo desde o início e
+// nunca esquece um outlier), trendErr só se move quando uma mudança é
+// CONFIRMADA por `CONFIRM_STREAK` amostras consecutivas fora da faixa
+// de ruído esperada. Um clique isolado no potenciômetro do Wokwi não
+// deixa rastro aqui; uma deriva real e persistente, sim.
+let trendErr = null;       // valor de tendência confirmado, usado na previsão
+let pendingErr = null;     // candidato a nova tendência, em observação
+let pendingStreak = 0;     // quantas amostras consecutivas confirmam o candidato
+
+function updateConfirmedTrend(instantAbsErr) {
+  if (trendErr === null) {
+    // primeira leitura: vira a tendência inicial diretamente
+    trendErr = instantAbsErr;
+    return trendErr;
+  }
+
+  const dentroDaFaixa = Math.abs(instantAbsErr - trendErr) <= NOISE_AMPLITUDE;
+
+  if (dentroDaFaixa) {
+    // leitura consistente com a tendência atual + ruído conhecido:
+    // atualização suave (média leve), sem dar peso desproporcional
+    // a uma única amostra.
+    trendErr = trendErr * 0.9 + instantAbsErr * 0.1;
+    pendingErr = null;
+    pendingStreak = 0;
+  } else {
+    // leitura fora da faixa de ruído conhecida: pode ser um clique
+    // isolado de simulação OU o início de uma mudança real. Não
+    // decide ainda — entra em observação.
+    if (pendingErr !== null && Math.abs(instantAbsErr - pendingErr) <= NOISE_AMPLITUDE) {
+      pendingStreak++;
+    } else {
+      pendingErr = instantAbsErr;
+      pendingStreak = 1;
+    }
+
+    if (pendingStreak >= CONFIRM_STREAK) {
+      // confirmado: a mudança persistiu por amostras suficientes,
+      // não foi um blip — a tendência salta para o novo nível real.
+      trendErr = pendingErr;
+      pendingErr = null;
+      pendingStreak = 0;
+    }
+    // enquanto não confirma, trendErr permanece no valor antigo —
+    // um salto isolado não contamina a previsão de manutenção.
+  }
+
+  return trendErr;
+}
+
+function openDrawer()  { document.getElementById('cfgDrawer').classList.add('open');  document.getElementById('cfgOverlay').classList.add('open'); }
+function closeDrawer() { document.getElementById('cfgDrawer').classList.remove('open'); document.getElementById('cfgOverlay').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+const chartDefaults = {
+  responsive: true, maintainAspectRatio: false, animation: { duration: 350 },
+  plugins: { legend: { display: false }, tooltip: {
+    mode: 'index', intersect: false, backgroundColor: '#fff', borderColor: '#e7e5e3', borderWidth: 1,
+    titleColor: '#1c1a18', bodyColor: '#6b6661',
+    titleFont: { family: "'IBM Plex Mono',monospace", size: 11 },
+    bodyFont:  { family: "'IBM Plex Mono',monospace", size: 11 },
+  }},
+  scales: {
+    x: { ticks: { font: { family: "'IBM Plex Mono',monospace", size: 10 }, color: '#a8a39d', maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#f4f4f3' }, border: { color: '#d6d3d0' } },
+    y: { ticks: { font: { family: "'IBM Plex Mono',monospace", size: 10 }, color: '#a8a39d' }, grid: { color: '#f4f4f3' }, border: { color: '#d6d3d0' } }
+  }
+};
+
+const cPH = new Chart(document.getElementById('chartPH').getContext('2d'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'pH medido', data: [], borderColor: '#2d6a4f', borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true, backgroundColor: 'rgba(45,106,79,0.07)' },
+    { label: 'Referência', data: [], borderColor: '#a8a39d', borderWidth: 1.5, borderDash: [5,3], pointRadius: 0, tension: 0 }
+  ]},
+  options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
+    title: { display: true, text: 'pH', font: { family: "'Archivo',sans-serif", size: 11 }, color: '#a8a39d' } } } }
+});
+
+const cErr = new Chart(document.getElementById('chartErr').getContext('2d'), {
+  type: 'line',
+  data: { labels: [], datasets: [{ label: 'Erro', data: [], borderColor: '#2d6a4f', borderWidth: 2, pointRadius: 0, tension: 0.4 }] },
+  options: { ...chartDefaults,
+    plugins: { ...chartDefaults.plugins, tooltip: { ...chartDefaults.plugins.tooltip,
+      callbacks: { label: ctx => 'Erro: ' + (ctx.parsed.y >= 0 ? '+' : '') + ctx.parsed.y.toFixed(4) } } },
+    scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
+      title: { display: true, text: 'Erro (pH)', font: { family: "'Archivo',sans-serif", size: 11 }, color: '#a8a39d' } } }
+  }
+});
+
+// O gráfico de manutenção preditiva tem 3 camadas, todas baseadas no
+// ERRO MÉDIO (não no pico instantâneo) — coerente com a lógica do painel
+// acima, que usa erro médio para evitar falsos alarmes por ruído de uma
+// única amostra:
+// 1) erro médio histórico (o que já aconteceu)
+// 2) projeção linear a partir do último ponto (para onde a tendência aponta)
+// 3) linha de limite constante (onde a falha é declarada)
+const cDeg = new Chart(document.getElementById('chartDeg').getContext('2d'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Tendência confirmada', data: [], borderColor: '#b91c1c', borderWidth: 2.5, pointRadius: 0, tension: 0.3, spanGaps: true },
+    { label: 'Projeção',             data: [], borderColor: '#b91c1c', borderWidth: 2, borderDash: [6,4], pointRadius: 0, tension: 0, spanGaps: true },
+    { label: 'Limite',               data: [], borderColor: '#a8a39d', borderWidth: 1.5, borderDash: [3,3], pointRadius: 0, tension: 0 },
+  ]},
+  options: { ...chartDefaults,
+    plugins: { ...chartDefaults.plugins, tooltip: { ...chartDefaults.plugins.tooltip,
+      callbacks: { label: ctx => {
+        if (ctx.dataset.label === 'Limite') return null;
+        return ctx.dataset.label + ': ' + (ctx.parsed.y ?? 0).toFixed(4) + ' pH';
+      }}
+    }},
+    scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y,
+      title: { display: true, text: 'Erro de tendência (pH)', font: { family: "'Archivo',sans-serif", size: 11 }, color: '#a8a39d' } } }
+  }
+});
+
+// Recalcula a projeção: pega os últimos pontos de TENDÊNCIA CONFIRMADA
+// (não erro médio bruto), estima a inclinação e estende uma reta até
+// cruzar THRESH_WARN. Como histTrend já filtra saltos isolados, a
+// projeção reflete a deriva real, não picos de simulação.
+function rebuildProjection() {
+  const n = histTrend.length;
+  if (n < 2) { cDeg.data.datasets[1].data = []; cDeg.data.datasets[2].data = []; return; }
+
+  const lastVal = histTrend[n - 1];
+  const projLen = 8; // pontos futuros desenhados além do histórico
+
+  // taxa local: diferença entre o último e um ponto anterior (até 10 amostras atrás)
+  const lookback = Math.min(10, n - 1);
+  const slope = (histTrend[n - 1] - histTrend[n - 1 - lookback]) / lookback;
+
+  const projData = new Array(n - 1).fill(null);
+  projData.push(lastVal);
+  for (let i = 1; i <= projLen; i++) {
+    const v = slope > 0 ? lastVal + slope * i : lastVal;
+    projData.push(Math.min(v, THRESH_WARN * 1.4));
+  }
+
+  const limiteData = new Array(n + projLen).fill(THRESH_WARN);
+
+  // labels futuros — extensão visual além do eixo de tempo real
+  const extLabels = [...histLabels];
+  for (let i = 1; i <= projLen; i++) extLabels.push('+' + i);
+
+  cDeg.data.labels = extLabels;
+  cDeg.data.datasets[0].data = [...histTrend];
+  cDeg.data.datasets[1].data = projData;
+  cDeg.data.datasets[2].data = limiteData;
+  cDeg.update('none');
+}
+
+function pushHistory(label, ph, ref, err, drift, avg, maxE, trend) {
+  histLabels.push(label); histPH.push(ph); histRef.push(ref); histErr.push(err);
+  histDrift.push(drift);  histAvg.push(avg); histMax.push(maxE); histTrend.push(trend);
+  if (histLabels.length > historyMax) {
+    histLabels.shift(); histPH.shift(); histRef.shift(); histErr.shift();
+    histDrift.shift(); histAvg.shift(); histMax.shift(); histTrend.shift();
+  }
+  cPH.data.labels = histLabels; cPH.data.datasets[0].data = histPH; cPH.data.datasets[1].data = histRef;
+  cErr.data.labels = histLabels; cErr.data.datasets[0].data = histErr;
+  cPH.update('none'); cErr.update('none');
+  rebuildProjection();
+}
+
+function fmtF(v, d=3)  { const n = parseFloat(v); return isNaN(n) ? '—' : n.toFixed(d); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function setConnUI(state) {
+  const dot = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  const pill = document.getElementById('headerPill');
+  const pillT = document.getElementById('headerPillText');
+  dot.className = 'conn-dot';
+  pill.className = 'header-pill';
+  if (state === 'connected') {
+    text.textContent = 'MQTT conectado'; pillT.textContent = 'MQTT conectado';
+  } else if (state === 'error') {
+    dot.classList.add('fail'); text.textContent = 'Erro de conexão'; pill.classList.add('waiting'); pillT.textContent = 'Erro de conexão';
+  } else {
+    dot.classList.add('warn'); text.textContent = 'Conectando...'; pill.classList.add('waiting'); pillT.textContent = 'Conectando...';
+  }
+}
+
+function updateHero(tone, ph, ref, bufName) {
+  const hero = document.getElementById('heroBox');
+  const symbol = document.getElementById('heroSymbol');
+  const statusText = document.getElementById('heroStatusText');
+  const statusSub = document.getElementById('heroStatusSub');
+
+  hero.className = 'hero tone-' + tone;
+
+  const config = {
+    ok:     { sym: '✓', title: 'Dentro da tolerância',  sub: 'Leitura consistente com a solução tampão de referência' },
+    alerta: { sym: '⚠', title: 'Desvio detectado',      sub: 'Erro acima do esperado — acompanhe a tendência' },
+    falha:  { sym: '✕', title: 'Fora da tolerância',     sub: 'Calibração recomendada imediatamente' },
+    neutral:{ sym: '○', title: 'Sem dados',              sub: 'Aguardando telemetria do sensor via MQTT' },
+  };
+  const c = config[tone] || config.neutral;
+  symbol.textContent = c.sym;
+  statusText.textContent = c.title;
+  statusSub.textContent = c.sub;
+
+  document.getElementById('heroPH').textContent = isNaN(ph) ? '—' : ph.toFixed(2);
+  document.getElementById('heroRef').textContent = isNaN(ref) ? '—' : ref.toFixed(2);
+  document.getElementById('heroBufferName').textContent = bufName || '—';
+}
+
+function updateDeviation(err) {
+  const arrowEl = document.getElementById('devArrow');
+  const textEl  = document.getElementById('devText');
+  if (isNaN(err)) { arrowEl.textContent = ''; textEl.textContent = 'sem desvio registrado'; return; }
+  const absErr = Math.abs(err);
+  if (absErr < 0.005) { arrowEl.textContent = '●'; textEl.textContent = 'sem desvio mensurável'; return; }
+  const acida = err < 0;
+  arrowEl.textContent = acida ? '▼' : '▲';
+  textEl.textContent = `${absErr.toFixed(4)} pH ${acida ? 'mais ácido' : 'mais alcalino'} que a referência`;
+}
+
+function trendArrow(curr, prev) {
+  if (prev === null || isNaN(curr) || isNaN(prev)) return { txt: '—', cls: 'flat' };
+  const diff = curr - prev;
+  if (Math.abs(diff) < 0.0001) return { txt: '→', cls: 'flat' };
+  const rising = diff > 0;
+  return { txt: rising ? '↑' : '↓', cls: rising ? 'up' : 'down' };
+}
+
+// Decisão: a manutenção preditiva usa o ERRO MÉDIO como tendência de fundo
+// (filtra ruído pontual, reflete deriva lenta e acumulada), MAS também checa
+// o erro instantâneo — porque uma falha súbita e severa (ex: leitura muito
+// fora da escala) não deve esperar a média histórica subir para ser
+// sinalizada. Sem essa checagem, uma média de centenas de amostras "boas"
+// pode mascarar uma leitura atual catastrófica, fazendo o painel dizer
+// "sensor estável" enquanto o hero already mostra falha severa — uma
+// contradição visual que confunde mais do que orienta.
+// A manutenção preditiva usa `trendErr` — a tendência CONFIRMADA por
+// persistência (ver updateConfirmedTrend) — em vez do erroMedio bruto do
+// firmware. Isso evita que um clique isolado no potenciômetro do Wokwi
+// (ou um pico real, mas passageiro) distorça permanentemente a previsão
+// de quando calibrar, já que erroMedio nunca "esquece" um outlier antigo.
+function updatePredictive(trendErrAtual, samples, driftAtual, instantErr) {
+  let taxa = DRIFT_RATE;
+  if (samples > 5 && !isNaN(driftAtual) && driftAtual > 0) {
+    taxa = driftAtual / samples;
+  }
+
+  const rem = Math.max(0, Math.floor((THRESH_WARN - trendErrAtual) / taxa));
+  const fillPct = Math.max(0, Math.min(100, (rem / 300) * 100));
+
+  const cdValue = document.getElementById('countdownValue');
+  const cdFill  = document.getElementById('countdownFill');
+  const panel = document.getElementById('predPanel');
+  const icon  = document.getElementById('predIcon');
+  const title = document.getElementById('predTitle');
+  const text  = document.getElementById('predText');
+
+  const instantAbs = Math.abs(instantErr);
+  const instantSevere = !isNaN(instantAbs) && instantAbs >= THRESH_WARN;
+
+  panel.className = 'pred-panel';
+  if (instantSevere) {
+    panel.classList.add('urgency-high');
+    icon.textContent = '⛔';
+    title.textContent = 'Leitura atual fora da tolerância';
+    text.textContent = `A leitura agora já excede o limite de ${THRESH_WARN.toFixed(2)} pH. Se persistir nas próximas amostras, a tendência será atualizada.`;
+    cdValue.textContent = '0'; cdValue.style.color = 'var(--fail)';
+    cdFill.style.width = '0%'; cdFill.style.background = 'var(--fail)';
+  } else if (trendErrAtual >= THRESH_WARN) {
+    panel.classList.add('urgency-high');
+    icon.textContent = '⛔';
+    title.textContent = 'Calibração necessária agora';
+    text.textContent = `A tendência confirmada já atingiu o limite de ${THRESH_WARN.toFixed(2)} pH.`;
+    cdValue.textContent = '0'; cdValue.style.color = 'var(--fail)';
+    cdFill.style.width = '0%'; cdFill.style.background = 'var(--fail)';
+  } else if (rem < 100) {
+    panel.classList.add('urgency-medium');
+    icon.textContent = '⚠';
+    title.textContent = 'Calibração recomendada em breve';
+    text.textContent = `No ritmo atual de deriva confirmada, o limite será atingido em breve.`;
+    cdValue.textContent = rem; cdValue.style.color = 'var(--warn)';
+    cdFill.style.width = fillPct.toFixed(1) + '%'; cdFill.style.background = 'var(--warn)';
+  } else {
+    panel.classList.add('urgency-low');
+    icon.textContent = '✓';
+    title.textContent = 'Sensor estável';
+    text.textContent = `Tendência confirmada dentro dos parâmetros, sem necessidade de calibração imediata.`;
+    cdValue.textContent = rem; cdValue.style.color = 'var(--ok)';
+    cdFill.style.width = fillPct.toFixed(1) + '%'; cdFill.style.background = 'var(--ok)';
+  }
+}
+
+function getPrefix() { return document.getElementById('cfgPrefix').value.trim() || 'ph'; }
+
+// Conecta ao bridge Python local (mqtt_bridge.py), não direto a um broker
+// externo. O bridge fala MQTT via TCP (porta 1883, sem bloqueio de rede)
+// e expõe essa ponte como WebSocket simples em ws://localhost:9001 — por
+// isso aqui usamos WebSocket nativo do navegador, não a biblioteca mqtt.js.
+// Mensagens trafegam como JSON: { topic, payload }.
+function reconnect() {
+  if (mqttClient) { try { mqttClient.close(); } catch(e){} }
+  const broker = document.getElementById('cfgBroker').value.trim();
+  const port   = parseInt(document.getElementById('cfgPort').value) || 9001;
+  const prefix = getPrefix();
+  const url = `ws://${broker}:${port}`;
+
+  document.getElementById('capTopic').textContent  = prefix + '/estatisticas';
+  document.getElementById('capBroker').textContent = broker + ':' + port;
+  setConnUI('connecting');
+
+  mqttClient = new WebSocket(url);
+
+  mqttClient.onopen = () => {
+    setConnUI('connected');
+    showToast('Bridge conectado · ' + url);
+  };
+
+  mqttClient.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (!msg || !msg.topic) return;
+      const data = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload;
+      handleMessage(msg.topic, data);
+    } catch(e) { /* mensagem não-JSON ou tópico irrelevante — ignora */ }
+  };
+
+  mqttClient.onerror = () => { setConnUI('error'); };
+  mqttClient.onclose  = () => {
+    setConnUI('connecting');
+    setTimeout(reconnect, 3000); // reconexão automática, como o cliente mqtt.js fazia
+  };
+}
+
+function handleMessage(topic, data) {
+  const ph      = parseFloat(data.leitura);
+  const ref     = parseFloat(data.referencia);
+  const err     = parseFloat(data.erro);
+  const avg     = parseFloat(data.erroMedio);
+  const maxE    = parseFloat(data.erroMaximo);
+  const drift   = parseFloat(data.derivaSensor);
+  const samples = parseInt(data.totalAmostras ?? 0);
+  const bufName = data.nomeBuffer ?? '—';
+
+  if (isNaN(ph)) return;
+
+  const absErr = Math.abs(err);
+  const tone = absErr <= THRESH_OK ? 'ok' : absErr <= THRESH_WARN ? 'alerta' : 'falha';
+  const timeStr = new Date().toLocaleTimeString('pt-BR');
+
+  updateHero(tone, ph, ref, bufName);
+  updateDeviation(err);
+
+  // Calcula a tendência confirmada por persistência a partir do erro
+  // instantâneo desta amostra — não do erroMedio bruto do firmware.
+  // Isso precisa vir antes de popular a UI, porque a faixa principal
+  // de sinais agora mostra a tendência confirmada, não o erro médio bruto.
+  const trendAtual = updateConfirmedTrend(absErr);
+
+  document.getElementById('kpiAvgErr').textContent   = fmtF(trendAtual, 4);
+  document.getElementById('kpiDrift').textContent    = fmtF(drift, 4);
+  document.getElementById('ctxTrend').textContent    = fmtF(trendAtual, 4);
+  document.getElementById('ctxAvg').textContent      = fmtF(avg, 4);
+  document.getElementById('ctxMax').textContent      = fmtF(maxE, 4);
+  document.getElementById('ctxSamples').textContent  = samples;
+  document.getElementById('ctxLastTime').textContent = 'Última leitura: ' + timeStr;
+
+  const tAvg = trendArrow(trendAtual, prevAvg);  document.getElementById('trendAvg').textContent = tAvg.txt;   document.getElementById('trendAvg').className   = 'signal-trend ' + tAvg.cls;
+  const tDrift = trendArrow(drift, prevDrift);   document.getElementById('trendDrift').textContent = tDrift.txt; document.getElementById('trendDrift').className = 'signal-trend ' + tDrift.cls;
+  prevAvg = trendAtual; prevDrift = drift;
+
+  if (!isNaN(trendAtual)) updatePredictive(trendAtual, samples, drift, err);
+
+  const label = timeStr.slice(0,8);
+  pushHistory(label, ph, ref, err, isNaN(drift)?0:drift, isNaN(avg)?0:avg, isNaN(maxE)?0:maxE, trendAtual);
+
+  if (!hasData) {
+    hasData = true;
+    document.getElementById('degradationPanel').style.display = 'block';
+    document.getElementById('chartsSection').style.display = 'block';
+    document.getElementById('emptyState').style.display = 'none';
+  }
+}
+
+function publish(subtopic, payload) {
+  if (!mqttClient || mqttClient.readyState !== WebSocket.OPEN) { showToast('Sem conexão com o bridge'); return; }
+  const topic = getPrefix() + subtopic;
+  mqttClient.send(JSON.stringify({ topic, payload: String(payload) }));
+  showToast('Publicado: ' + topic + ' → ' + payload);
+}
+
+function sendBuffer()   { publish('/cmd/buffer',    document.getElementById('cfgBuffer').value); }
+function sendInterval() { publish('/cmd/intervalo', document.getElementById('cfgInterval').value); }
+function calibrate() {
+  publish('/cmd/calibrar', 'reset');
+  histLabels=[]; histPH=[]; histRef=[]; histErr=[]; histDrift=[]; histAvg=[]; histMax=[]; histTrend=[];
+  prevAvg = null; prevDrift = null;
+  trendErr = null; pendingErr = null; pendingStreak = 0;
+  cPH.data.labels=[]; cPH.data.datasets.forEach(d=>d.data=[]); cPH.update();
+  cErr.data.labels=[]; cErr.data.datasets.forEach(d=>d.data=[]); cErr.update();
+  cDeg.data.labels=[]; cDeg.data.datasets.forEach(d=>d.data=[]); cDeg.update();
+  showToast('Calibração enviada — histórico limpo');
+}
+
+reconnect();
+</script>
+</body>
+</html>

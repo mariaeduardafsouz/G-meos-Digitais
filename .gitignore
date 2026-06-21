@@ -4,3 +4,4 @@ __pycache__/
 streamlit_app/*.log
 streamlit_app/streamlit.out.log
 streamlit_app/streamlit.err.log
+.pio/

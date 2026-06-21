@@ -1,39 +1,43 @@
-# Dashboard Streamlit - Gemeo Digital pH
+# Bridge MQTT–WebSocket
 
-Este app consome os dados MQTT publicados pelo ESP32 no Wokwi e oferece uma
-interface para acompanhamento do gemeo digital do sensor de pH.
+Script Python que conecta o broker MQTT externo ao dashboard HTML via WebSocket local.
+
+## Por que existe
+
+O navegador não consegue conectar diretamente ao broker `broker.emqx.io` porque redes com firewall bloqueiam as portas WebSocket do MQTT (8000–9999), e abrir o HTML via `file://` adiciona restrições de origem. O `mqtt_bridge.py` resolve isso: conecta ao broker via TCP (porta 1883, não bloqueada) e expõe um WebSocket em `localhost:9001` que o navegador sempre alcança.
 
 ## Como rodar
 
-Crie e ative um ambiente virtual, instale as dependencias e inicie o Streamlit:
+Com o ambiente virtual já criado:
 
 ```powershell
-cd C:\Users\KABUM\Documents\Playground\Gemeos_Digitais
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r streamlit_app\requirements.txt
-.\.venv\Scripts\python -m streamlit run streamlit_app\app.py
+streamlit_app\.venv\Scripts\python.exe streamlit_app\mqtt_bridge.py
 ```
 
-Depois abra a URL exibida pelo Streamlit, normalmente:
+Para criar o ambiente virtual pela primeira vez:
 
-```text
-http://localhost:8501
+```powershell
+python -m venv streamlit_app\.venv
+streamlit_app\.venv\Scripts\python -m pip install -r streamlit_app\requirements.txt
 ```
 
-## Fluxo esperado
+Pacotes instalados: `paho-mqtt >= 2.1` e `websockets >= 12.0`.
 
-1. Inicie a simulacao no Wokwi.
-2. O firmware publica em `ph/estatisticas`.
-3. O dashboard assina `ph/#` no broker `broker.hivemq.com`.
-4. Use os controles do dashboard para enviar comandos:
+## Saída esperada
 
-```text
-ph/cmd/buffer
-ph/cmd/calibrar
-ph/cmd/intervalo
+```
+[Bridge] WebSocket local em ws://localhost:9001
+[Bridge] Aguardando dados de broker.emqx.io:1883 ...
+[MQTT] Conectado ao broker broker.emqx.io (rc=0)
+[WS] Dashboard conectado (1 cliente(s))
 ```
 
-## Observacao
+## Configuração
 
-O broker HiveMQ publico e compartilhado. Para um projeto em producao, use um
-prefixo de topico unico ou um broker privado.
+| Variável | Valor padrão | Descrição |
+|---|---|---|
+| `MQTT_BROKER` | `broker.emqx.io` | Broker público compartilhado |
+| `MQTT_PORT` | `1883` | TCP — não WebSocket |
+| `TOPIC_SUB` | `ph/#` | Subscreve todos os tópicos do projeto |
+| `WS_HOST` | `localhost` | Endereço do WebSocket local |
+| `WS_PORT` | `9001` | Porta do WebSocket local |
